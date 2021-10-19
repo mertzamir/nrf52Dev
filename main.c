@@ -96,10 +96,10 @@
 
 /*Define MFIO and RSTN pins*/
 
-#define SDA_PIN 23
-#define SCL_PIN 22
-#define RSTN_PIN 25
-#define MFIO_PIN 24 
+#define SDA_PIN 11 //23
+#define SCL_PIN 12 //22
+#define RSTN_PIN 13 //25 //20
+#define MFIO_PIN 14 //24 
 /* TWI instance ID. */
 #define TWIM_INSTANCE_ID     0
 
@@ -180,6 +180,8 @@ static bool     m_rr_interval_enabled = true;                       /**< Flag fo
 static  uint16_t dummy = 110;
 static uint8_t zone_val = 0;
 static uint16_t hrVal = 0;
+static uint8_t algoStateGlobal = 0;
+static uint16_t storageHR = 0;
 
 /*
  * Benji's Functions Start
@@ -450,7 +452,7 @@ static void heart_rate_meas_timeout_handler(void * p_context)
     UNUSED_PARAMETER(p_context);
 
     //heart_rate = (uint16_t)sensorsim_measure(&m_heart_rate_sim_state, &m_heart_rate_sim_cfg);
-    heart_rate = hrVal;
+    heart_rate = storageHR;
 
     cnt++;
     err_code = ble_hrs_heart_rate_measurement_send(&m_hrs, heart_rate);
@@ -1068,6 +1070,17 @@ static void idle_state_handle(void)
     }
 }
 
+static void handleHR(uint16_t * storage, uint16_t * hr)
+{
+  if (algoStateGlobal == 1)
+  {
+    if (*hr != 0)
+    {
+      *storage = *hr;
+    }
+  }
+}
+
 
 /**@brief Function for application main entry.
  */
@@ -1113,6 +1126,20 @@ int main(void)
     tx_data[1] = 0x00;
     nrfx_twim_xfer_desc_t TX2Bytes = NRFX_TWIM_XFER_DESC_TX(address, (uint8_t*)tx_data, sizeof(uint8_t)*2);
     nrfx_twim_xfer_desc_t RX2Bytes = NRFX_TWIM_XFER_DESC_RX(address, (uint8_t*)rx_data, sizeof(uint8_t)*2);
+    //int dataRdy = 0;
+    //while (dataRdy != 8) {
+    //  err_code = nrfx_twim_xfer(&m_twim, &TX2Bytes, 0);
+    //  nrf_delay_ms(3);    
+    //  err_code = nrfx_twim_xfer(&m_twim, &RX2Bytes, 0);
+    //  dataRdy = rx_data[1] & (1 << 3);
+    //  printf("0-%d\n", rx_data[0]);
+    //  printf("1-%d\n", rx_data[1]);
+    //  printf("2-%d\n", rx_data[2]);
+    //  printf("3-%d\n", rx_data[3]);
+    //  printf("%d", dataRdy);
+    //}
+
+
 
     err_code = nrfx_twim_xfer(&m_twim, &TX2Bytes, 0);
     nrf_delay_ms(3);    
@@ -1128,7 +1155,6 @@ int main(void)
 
     int numSamples = rx_data[1];
 
-
     //READ DATA STORED IN FIFO
     tx_data[0] = READ_OUTPUT_FIFO;
     tx_data[1] = 0x01;
@@ -1139,24 +1165,29 @@ int main(void)
     // Enter main loop.
     for (;;)
     {
-        //idle_state_handle();
-        
+        idle_state_handle();
+
         err_code = nrfx_twim_xfer(&m_twim, &TX2Bytes, 0);
         nrf_delay_ms(10);
         err_code = nrfx_twim_xfer(&m_twim, &RX25Bytes, 0);
-    
 
         uint16_t num = (rx_data[19] << 8);
         num |= rx_data[20];
         hrVal= num/10;
-        printf("%d", hrVal);
+        uint16_t algoState = rx_data[24]; // 0x03 HR Detected
+        if (algoState == 0X03) { //First HR reading is done 
+          algoStateGlobal = 1;
+        }
+        handleHR(&storageHR, &hrVal);
+        status = rx_data[25];
+
+        printf("%d\n", storageHR);
 
       
-        NRF_LOG_INFO("HR: %d\n",hrVal);
+        NRF_LOG_INFO("HR: %d\n",storageHR);
         NRF_LOG_INFO("Confidence: %d\n\n", rx_data[21]);
         NRF_LOG_FLUSH();
-        nrf_delay_ms(1000);
-        
+        nrf_delay_ms(1000);   
     }
 
 }
